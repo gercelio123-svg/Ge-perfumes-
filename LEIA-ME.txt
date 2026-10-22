@@ -1,0 +1,9 @@
+PERFUMES DO GE — INTEGRAÇÃO MERCADO PAGO (BASE PARA IMPLANTAÇÃO)
+
+1. Instale Node.js 18+; execute npm install.
+2. Copie .env.example para .env e configure MP_ACCESS_TOKEN, MP_WEBHOOK_SECRET e PUBLIC_BASE_URL (HTTPS). Nunca envie tokens pelo chat nem os coloque no HTML.
+3. Preencha catalogo-servidor.json com produtos autorizados: [{"id":"1","title":"Perfume exemplo","price_cents":15990,"stock":5}]. IDs precisam corresponder aos do carrinho da loja. Preços são em centavos e conferidos pelo servidor.
+4. Execute npm start; hospede em servidor com HTTPS. Configure o webhook de pagamentos no painel Mercado Pago para https://SEU_DOMINIO/api/webhook/mercadopago.
+5. Teste pagamentos, conciliação, reembolsos e persistência antes de produção.
+
+ATENÇÃO: Protótipo técnico, NÃO pronto para receber pagamentos reais. O catálogo administrativo do HTML usa armazenamento local e NÃO sincroniza com catalogo-servidor.json. O registro de pedidos é somente em memória (perde-se ao reiniciar). É necessário banco de dados, controle de estoque transacional, autenticação de administrador, validação completa de notificações e testes de ponta a ponta antes da publicação. Não marque pedidos como pagos somente pelo retorno do navegador.

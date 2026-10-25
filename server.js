@@ -34,7 +34,7 @@ app.post('/api/admin/upload-image',auth,async(req,res)=>{
   form.append('api_key',key);form.append('timestamp',String(timestamp));form.append('folder',folder);form.append('signature',signature);
   const response=await fetch(`https://api.cloudinary.com/v1_1/${encodeURIComponent(cloud)}/image/upload`,{method:'POST',body:form,signal:AbortSignal.timeout(25000)});
   const result=await response.json();
-  if(!response.ok||!/^https:\/\//.test(result.secure_url||''))throw Error('O serviço de imagens recusou o envio. Confira as credenciais.');
+  if(!response.ok||!/^https:\/\//.test(result.secure_url||'')){const mensagem=String(result?.error?.message||'Resposta sem URL segura').slice(0,300);console.error('cloudinary-upload:',response.status,mensagem);throw Error('Falha ao enviar imagem ao Cloudinary');}
   res.json({url:result.secure_url});
  }catch(e){console.error('upload-image:',e.message);res.status(502).json({error:'Não foi possível salvar a foto. Verifique as configurações do serviço de imagens.'})}
 });

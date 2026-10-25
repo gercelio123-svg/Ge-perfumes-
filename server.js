@@ -1,11 +1,43 @@
 require('dotenv').config();
 const express=require('express'),fs=require('fs'),path=require('path'),crypto=require('crypto');
-const app=express();app.disable('x-powered-by');app.use(express.json({limit:'50kb'}));
+const app=express();app.disable('x-powered-by');
+// A rota de fotos precisa aceitar payload maior antes do parser geral.
+const allowedOrigin='https://gercelio123-svg.github.io';
+app.use((req,res,next)=>{const origin=req.get('origin');if(origin===allowedOrigin){res.set('Access-Control-Allow-Origin',allowedOrigin);res.set('Vary','Origin');res.set('Access-Control-Allow-Methods','GET,POST,DELETE,OPTIONS');res.set('Access-Control-Allow-Headers','Content-Type,x-admin-password')}if(req.method==='OPTIONS')return res.sendStatus(origin===allowedOrigin?204:403);next()});
+app.use('/api/admin/upload-image',express.json({limit:'7mb'}));
+app.use(express.json({limit:'50kb'}));
 const file=process.env.DATA_FILE||path.join(__dirname,'data.json');
 function read(){try{return JSON.parse(fs.readFileSync(file,'utf8'))}catch{return {products:[],orders:{}}}}
 function save(data){fs.mkdirSync(path.dirname(file),{recursive:true});const tmp=file+'.tmp';fs.writeFileSync(tmp,JSON.stringify(data,null,2));fs.renameSync(tmp,file)}
 function auth(req,res,next){const expected=process.env.ADMIN_PASSWORD;if(!expected||expected.length<12)return res.status(503).json({error:'Configure ADMIN_PASSWORD com 12 ou mais caracteres.'});const supplied=req.get('x-admin-password')||'';const a=crypto.createHash('sha256').update(expected).digest(),b=crypto.createHash('sha256').update(supplied).digest();if(!crypto.timingSafeEqual(a,b))return res.status(401).json({error:'Senha inválida'});next()}
 const clean=p=>({id:String(p.id||crypto.randomUUID()),brand:String(p.brand||'').trim().slice(0,90),name:String(p.name||'').trim().slice(0,130),category:String(p.category||'Árabe').slice(0,60),size:String(p.size||'').trim().slice(0,50),price_cents:Math.round(Number(p.price)*100),stock:Number(p.stock),images:(Array.isArray(p.images)?p.images:[]).filter(x=>typeof x==='string'&&/^https:\/\//i.test(x)).slice(0,3)});
+// Upload privado para armazenamento persistente de imagens no Cloudinary.
+// As credenciais ficam somente no Render, nunca no navegador ou GitHub.
+app.post('/api/admin/upload-image',auth,async(req,res)=>{
+ try{
+  const {CLOUDINARY_CLOUD_NAME:cloud,CLOUDINARY_API_KEY:key,CLOUDINARY_API_SECRET:secret}=process.env;
+  if(!cloud||!key||!secret)return res.status(503).json({error:'Configure CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY e CLOUDINARY_API_SECRET no Render.'});
+  const value=req.body?.data;
+  const match=typeof value==='string'&&/^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/.exec(value);
+  if(!match)return res.status(400).json({error:'Escolha uma foto JPG, PNG ou WEBP.'});
+  const bytes=Buffer.from(match[2],'base64');
+  if(!bytes.length||bytes.length>5*1024*1024)return res.status(400).json({error:'A foto deve ter até 5 MB.'});
+  const mime=match[1];
+  const valid=mime==='image/jpeg'?bytes[0]===255&&bytes[1]===216&&bytes[2]===255:
+    mime==='image/png'?bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])):
+    bytes.toString('ascii',0,4)==='RIFF'&&bytes.toString('ascii',8,12)==='WEBP';
+  if(!valid)return res.status(400).json({error:'Arquivo de imagem inválido.'});
+  const timestamp=Math.floor(Date.now()/1000),folder='perfumes-do-ge';
+  const signature=crypto.createHash('sha1').update(`folder=${folder}&timestamp=${timestamp}${secret}`).digest('hex');
+  const form=new FormData();
+  form.append('file',`data:${mime};base64,${match[2]}`);
+  form.append('api_key',key);form.append('timestamp',String(timestamp));form.append('folder',folder);form.append('signature',signature);
+  const response=await fetch(`https://api.cloudinary.com/v1_1/${encodeURIComponent(cloud)}/image/upload`,{method:'POST',body:form,signal:AbortSignal.timeout(25000)});
+  const result=await response.json();
+  if(!response.ok||!/^https:\/\//.test(result.secure_url||''))throw Error('O serviço de imagens recusou o envio. Confira as credenciais.');
+  res.json({url:result.secure_url});
+ }catch(e){console.error('upload-image:',e.message);res.status(502).json({error:'Não foi possível salvar a foto. Verifique as configurações do serviço de imagens.'})}
+});
 app.get('/api/products',(req,res)=>res.json(read().products));
 app.get('/api/health',(req,res)=>res.json({ok:true}));
 app.post('/api/admin/products',auth,(req,res)=>{const p=clean(req.body);if(!p.brand||!p.name||!p.size||!Number.isSafeInteger(p.price_cents)||p.price_cents<0||!Number.isSafeInteger(p.stock)||p.stock<0)return res.status(400).json({error:'Dados inválidos'});const db=read();const idx=db.products.findIndex(x=>x.id===p.id);if(idx<0)db.products.push(p);else db.products[idx]=p;save(db);res.json(p)});
